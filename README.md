@@ -4,7 +4,7 @@ Thomas A. Clay, Samantha C. Patrick, Caitlin K. Frankish, Rocío Joo, Mathieu Ba
 
 ## Overview 
 
-The following repository contains codes and data to reproduce the main results of the paper, submitted to X.
+The following repository contains codes and data to reproduce the main results of the paper, submitted to Journal of Animal Ecology.
 
 There are 2 folders: "Codes" and "Data_inputs". The provided code should create "Data_outputs" and "Plots" folders. 
 
