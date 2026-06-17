@@ -1,0 +1,27 @@
+{
+    "id": "E7E1A5AA",
+    "path": "~/GitHub/juv-morph-wind/Codes/1_reproducing_analyses/2_departure_timing_markov_models.R",
+    "project_path": "Codes/1_reproducing_analyses/2_departure_timing_markov_models.R",
+    "type": "r_source",
+    "hash": "3517980900",
+    "contents": "",
+    "dirty": false,
+    "created": 1779205679198.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "8,0",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1779206014,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1779206014087,
+    "read_only": false,
+    "read_only_alternatives": []
+}
