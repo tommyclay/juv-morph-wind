@@ -353,7 +353,7 @@ in_gha_mass$mass <- as.factor(as.character(in_gha_mass$mass))
 
 p_gha_mass <- ggplot(in_gha_mass, aes(x = age2, y = prob_mean, fill = mass, linetype = mass)) +
   geom_ribbon(aes(ymin = lower_mean, ymax = upper_mean), alpha = 0.2, fill = "#009E73") +
-  geom_line(size = 0.6, col = "#009E73") +
+  geom_line(linewidth = 0.6, col = "#009E73") +
   labs(y = "Departure probability",
        x = "Chick age (days)", linetype = "Mass (kg)", fill = "Mass (kg)") +
   theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
