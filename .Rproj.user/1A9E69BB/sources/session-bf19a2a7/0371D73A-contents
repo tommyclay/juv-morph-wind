@@ -1,0 +1,1526 @@
+library(ggplot2)
+library(plyr)
+library(mgcv)
+library(mgcViz)
+library(psych)
+library(MuMIn)
+library(DHARMa)
+library(itsadug)
+library(splines)
+library(geepack)
+library(lmtest)
+library(glmtoolbox)
+library(car)
+library(suncalc)
+
+#### 1. LOAD IN AND SORT OUT DATA ####
+
+
+hat <- read.csv("./Data_outputs/Predator-prey paper/HAT_seasonal_oceano_outputs.csv")
+
+hat$Year <- substr(hat$Date_local, 1, 4)
+hat <- subset(hat, Year != "2017",)
+hat$Date_local <- as.Date(hat$Date_local)
+
+# just important variables - SST, Chl, MLD and Fpers seasonal and resid, Lunar, Med centre mass, Med total NASC
+hat_df <- na.omit(data.frame(DPH = hat$Detection_auto_DPH, SST_pred = hat$SST_pred,
+                             SST_resid = hat$SST_resid, CHL_pred = hat$CHL_pred,
+                             CHL_resid = hat$CHL_resid, MLD_pred = hat$MLD_pred,
+                             MLD_resid = hat$MLD_resid, Fpers_pred = hat$Fpers_pred,
+                             Fpers_resid = hat$Fpers_resid, Lunar = hat$Lunar,
+                             EKE = hat$EKE_mean,
+                             Med_centre_mass = hat$Med_centre_mass, 
+                             Med_tot_nasc = hat$Med_tot_nasc,
+                             Year = hat$Year))
+
+
+#### 2. CHECKING VARIABLE CORRELATIONS AND TRANSFORMATIONS ####
+
+source("./Codes/HighstatLibV10.R")
+
+# HAT #
+
+MyVar <- c("SST_pred","SST_resid", "MLD_pred", "MLD_resid", "CHL_pred", "CHL_resid", 
+           "EKE", "Fpers_pred", "Fpers_resid",  "Med_centre_mass", "Med_tot_nasc")
+
+corvif(hat_df[,MyVar])
+# GVIF
+# SST_pred        3.641317
+# SST_resid       1.076106
+# MLD_pred        8.225797
+# MLD_resid       1.026671
+# CHL_pred        1.980661
+# CHL_resid       1.114978
+# EKE             1.293483
+# Fpers_pred      5.075009
+# Fpers_resid     1.019083
+# Med_centre_mass 1.614929
+# Med_tot_nasc    1.589625
+
+psych::corr.test(hat_df[,MyVar], method = "spearman")
+#                   SST_pred SST_resid MLD_pred MLD_resid CHL_pred CHL_resid   EKE Fpers_pred Fpers_resid Med_centre_mass Med_tot_nasc
+# SST_pred            1.00      0.02    -0.83     -0.01    -0.61     -0.01  0.38      -0.74       -0.05            0.09        -0.01
+# SST_resid           0.02      1.00    -0.01      0.06     0.01     -0.25  0.04       0.03       -0.10            0.05        -0.06
+# MLD_pred           -0.83     -0.01     1.00      0.01     0.69     -0.01 -0.38       0.86        0.03           -0.10         0.02
+# MLD_resid          -0.01      0.06     0.01      1.00    -0.02      0.05 -0.01       0.02       -0.08            0.05        -0.02
+# CHL_pred           -0.61      0.01     0.69     -0.02     1.00     -0.03 -0.27       0.64        0.04           -0.06         0.03
+# CHL_resid          -0.01     -0.25    -0.01      0.05    -0.03      1.00  0.06       0.00        0.00           -0.14         0.13
+# EKE                 0.38      0.04    -0.38     -0.01    -0.27      0.06  1.00      -0.39        0.01           -0.07         0.07
+# Fpers_pred         -0.74      0.03     0.86      0.02     0.64      0.00 -0.39       1.00        0.05           -0.11         0.02
+# Fpers_resid        -0.05     -0.10     0.03     -0.08     0.04      0.00  0.01       0.05        1.00           -0.03         0.03
+# Med_centre_mass     0.09      0.05    -0.10      0.05    -0.06     -0.14 -0.07      -0.11       -0.03            1.00        -0.94
+# Med_tot_nasc       -0.01     -0.06     0.02     -0.02     0.03      0.13  0.07       0.02        0.03           -0.94         1.00
+
+# MLD and SST are correlated - remove MLD
+
+MyVar <- c("SST_pred","SST_resid", "MLD_resid", "CHL_pred", "CHL_resid", 
+           "EKE", "Fpers_pred", "Fpers_resid",  "Med_centre_mass", "Med_tot_nasc")
+
+corvif(hat_df[,MyVar])
+# GVIF
+# SST_pred        2.520669
+# SST_resid       1.076102
+# MLD_resid       1.026667
+# CHL_pred        1.849690
+# CHL_resid       1.114680
+# EKE             1.292367
+# Fpers_pred      2.810283
+# Fpers_resid     1.019023
+# Med_centre_mass 1.612296
+# Med_tot_nasc    1.587326
+psych::corr.test(hat_df[,MyVar], method = "spearman")
+# Fpers pred and SST pred are negatively correlated = -0.74
+# CHL pred and Fpers pred are correlated? = 0.64
+# SST pred and CHL pred are negatively correlated? = -0.61
+# Med center of mass and NASC are negatively correlated? = -0.94
+
+# does removing Fpers and NASC reduce VIF and correlation?
+MyVar <- c("SST_pred","SST_resid", "MLD_resid", "CHL_pred", "CHL_resid", 
+           "EKE", "Fpers_resid",  "Med_centre_mass")
+corvif(hat_df[,MyVar])
+# Variance inflation factors
+# GVIF
+# SST_pred        1.762812
+# SST_resid       1.075501
+# MLD_resid       1.026428
+# CHL_pred        1.641602
+# CHL_resid       1.111942
+# EKE             1.191535
+# Fpers_resid     1.018418
+# Med_centre_mass 1.033972
+
+psych::corr.test(hat_df[,MyVar], method = "spearman")
+# SST pred and CHL pred = -0.61
+
+# NEED TO TEST:
+# - SST VS MLD
+# - SST VS FPERS
+# - CENTER MASS VS NASC
+
+hist(hat_df$SST_pred)
+hist(hat_df$SST_resid)
+hist(hat_df$CHL_pred)
+#hist(log(hat_df$CHL_pred))
+hist(hat_df$CHL_resid)
+hist(hat_df$MLD_resid)
+hist(hat_df$Fpers_pred)
+hist(hat_df$Fpers_resid)
+hist(hat_df$EKE)
+hist(sqrt(hat_df$EKE))
+hat_df$sqrt_EKE <- sqrt(hat_df$EKE)
+hist(hat_df$Med_centre_mass)
+hist(hat_df$Med_tot_nasc)
+hist(log(hat_df$Med_tot_nasc))
+hat_df$log_med_tot_nasc <- log(hat_df$Med_tot_nasc)
+
+# creating random variable
+hat_df$Random <- sample(seq(1, nrow(hat_df), 1), nrow(hat_df), replace = FALSE)
+
+hat_df$Year <- as.factor(as.character(hat_df$Year))
+
+
+#### 3. CHOOSING THE BEST DISTRIBUTION FAMILY USING GAMS ####
+
+
+# POISSON #
+
+m_hat_pois <- gam(DPH~ s(SST_pred,bs="cs",k=5)+s(SST_resid,bs="cs",k=5)+s(CHL_pred,bs="cs",k=5)+
+                    s(CHL_resid,bs="cs",k=5)+s(MLD_resid,bs="cs",k=5)+s(Fpers_pred,bs="cs",k=5)+
+                    s(Fpers_resid,bs="cs",k=5)+s(sqrt_EKE,bs="cs",k=5)+
+                    s(Lunar,bs="cs",k=5)+s(Med_centre_mass,bs="cs",k=5)+
+                    s(log_med_tot_nasc,bs="cs",k=5) + s(Random, bs = "cs", k = 5),
+                  family = "poisson", data = hat_df, method = "ML")
+
+# checking DHARMa residuals
+sim <- simulateResiduals(m_hat_pois, n = 500, refit = F,
+                         integerResponse = NULL, plot = F)
+testTemporalAutocorrelation(sim, time = #kog.dat$Date_seq,
+                              1:length(sim$scaledResiduals),
+                            alternative = c("two.sided"), plot = T)
+# data:  simulationOutput$scaledResiduals ~ 1
+# DW = 1.2678, p-value < 2.2e-16
+# alternative hypothesis: true autocorrelation is not 0
+
+# TESTING OVERDISPERSION AND ZERO INFLATION USING DHARMA
+testDispersion(sim)
+# data:  simulationOutput
+# dispersion =  1.7108, p-value < 2.2e-16
+# alternative hypothesis: two.sided
+
+# overdispersed!
+
+# NEG BIN #
+
+m_hat_nb <- gam(DPH~ s(SST_pred,bs="cs",k=5)+s(SST_resid,bs="cs",k=5)+s(CHL_pred,bs="cs",k=5)+
+                  s(CHL_resid,bs="cs",k=5)+s(MLD_resid,bs="cs",k=5)+s(Fpers_pred,bs="cs",k=5)+
+                  s(Fpers_resid,bs="cs",k=5)+s(sqrt_EKE,bs="cs",k=5)+
+                  s(Lunar,bs="cs",k=5)+s(Med_centre_mass,bs="cs",k=5)+
+                  s(log_med_tot_nasc,bs="cs",k=5) + s(Random, bs = "cs", k = 5),
+                family = nb(link = "log"), data = hat_df, method = "ML")
+
+# checking DHARMa residuals
+sim <- simulateResiduals(m_hat_nb, n = 500, refit = F,
+                         integerResponse = NULL, plot = F)
+testTemporalAutocorrelation(sim, time = #kog.dat$Date_seq,
+                              1:length(sim$scaledResiduals),
+                            alternative = c("two.sided"), plot = T)
+# data:  simulationOutput$scaledResiduals ~ 1
+# DW =1.2028, p-value < 2.2e-16
+# alternative hypothesis: true autocorrelation is not 0
+
+# TESTING OVERDISPERSION AND ZERO INFLATION USING DHARMA
+testDispersion(sim)
+# data:  simulationOutput
+# dispersion = 0.85769, p-value < 2.2e-16
+# alternative hypothesis: two.sided
+
+# underdispersed
+
+# GAUSSIAN #
+
+m_hat_g <- gam(DPH~ s(SST_pred,bs="cs",k=5)+s(SST_resid,bs="cs",k=5)+s(CHL_pred,bs="cs",k=5)+
+                 s(CHL_resid,bs="cs",k=5)+s(MLD_resid,bs="cs",k=5)+s(Fpers_pred,bs="cs",k=5)+
+                 s(Fpers_resid,bs="cs",k=5)+s(sqrt_EKE,bs="cs",k=5)+
+                 s(Lunar,bs="cs",k=5)+s(Med_centre_mass,bs="cs",k=5)+
+                 s(log_med_tot_nasc,bs="cs",k=5) + s(Random, bs = "cs", k = 5),
+               data = hat_df, method = "ML")
+
+# checking DHARMa residuals
+sim <- simulateResiduals(m_hat_g, n = 500, refit = F,
+                         integerResponse = NULL, plot = F)
+testTemporalAutocorrelation(sim, time = #kog.dat$Date_seq,
+                              1:length(sim$scaledResiduals),
+                            alternative = c("two.sided"), plot = T)
+# data:  simulationOutput$scaledResiduals ~ 1
+# DW = 1.2223, p-value < 2.2e-16
+# alternative hypothesis: true autocorrelation is not 0
+
+# TESTING OVERDISPERSION AND ZERO INFLATION USING DHARMA
+testDispersion(sim)
+# data:  simulationOutput
+# dispersion = 0.97614, p-value = 0.604
+# alternative hypothesis: two.sided
+
+# perfect!
+
+
+#### 4. AUTOCORRELATION BLOCKS ####
+
+
+acf(hat_df$DPH, lag.max=30)
+acf(hat_df$DPH, lag.max=100)
+acf(hat_df$DPH, lag.max=300)
+acf(hat_df$DPH, lag.max=500)
+acf(hat_df$DPH, lag.max=1000)
+# looks like main cycle is 180 = 6 months
+block <- 180
+#hat$dol_block <- rep(c(TRUE, rep(FALSE, block-1)), (nrow(hat)/block)+1)[1:nrow(hat)]
+hat_df$dol_block <- rep(seq(1, nrow(hat_df)/block, 1), each = block)[1:nrow(hat_df)]
+# making na values larger
+hat_df$dol_block[is.na(hat_df$dol_block)] <- max(na.omit(hat_df$dol_block))+1
+
+
+### 5. RUNNING FULL MODEL ####
+
+# creating splines
+hat_df$sst_spline <- bs(hat_df$SST_pred, df = 4)
+hat_df$sst_resid_spline <- bs(hat_df$SST_resid, df = 4)
+hat_df$chl_spline <- bs(hat_df$CHL_pred, df = 4)
+hat_df$chl_resid_spline <- bs(hat_df$CHL_resid, df = 4)
+hat_df$mld_spline <- bs(hat_df$MLD_pred, df = 4)
+hat_df$mld_resid_spline <- bs(hat_df$MLD_resid, df = 4)
+hat_df$fpers_spline <- bs(hat_df$Fpers_pred, df = 4)
+hat_df$fpers_resid_spline <- bs(hat_df$Fpers_resid, df = 4)
+hat_df$eke_spline <- bs(hat_df$sqrt_EKE, df = 4)
+hat_df$nasc_spline <- bs(hat_df$log_med_tot_nasc, df = 4)
+hat_df$center_spline <- bs(hat_df$Med_centre_mass, df = 4)
+
+# fitting full model
+hat_m_full <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                       chl_resid_spline + fpers_spline + fpers_resid_spline +
+                       mld_spline + mld_resid_spline + eke_spline +
+                       center_spline + nasc_spline + Lunar + 
+                       Year, 
+                     id = dol_block, 
+                     corstr = "independence", 
+                     family = gaussian, 
+                     data = hat_df)
+
+summary(hat_m_full)
+acf(resid(hat_m_full)) # some slight autocorrelation
+geepack::QIC(hat_m_full) 
+# QIC      QICu Quasi Lik       CIC    params      QICC 
+# 18769.8   18756.8   -9330.4      54.5      48.0   18660.4 
+
+dwtest(hat_m_full, alternative = "two.sided")
+# data:  hat_m_full
+# DW = 1.3, p-value <2e-16
+# alternative hypothesis: true autocorrelation is not 0
+
+# calculating pseudo R2
+null_mod <- geeglm(DPH ~ 1, id = dol_block, data = hat_df, family = gaussian(), corstr = "independence")
+r2 <- function(null, mod, var) {
+  dev_null <- sum((var - fitted(null))^2)
+  dev_model <- sum((var - fitted(mod))^2)
+  pseudo_r2 <- (1 - (dev_model / dev_null))*100
+  return(pseudo_r2)
+}
+r2(null = null_mod, mod = hat_m_full, var = hat_df$DPH)
+# Pseudo R-squared for GEE: 32.5 %
+
+
+#### 6. CHOOSING BEST AUTOCORRELATION STRUCTURE #####
+
+hat_m_ar1 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                      chl_resid_spline + fpers_spline + fpers_resid_spline +
+                      mld_spline + mld_resid_spline + eke_spline +
+                      center_spline + nasc_spline + Lunar + 
+                       Year, 
+                     id = dol_block, 
+                     corstr = "ar1", 
+                     family = gaussian, 
+                     data = hat_df)
+
+hat_m_ind <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                      chl_resid_spline + fpers_spline + fpers_resid_spline +
+                      mld_spline + mld_resid_spline + eke_spline +
+                      center_spline + nasc_spline + Lunar + 
+                      Year, 
+                    id = dol_block, 
+                    corstr = "independence", 
+                    family = gaussian, 
+                    data = hat_df)
+
+geepack::QIC(hat_m_ar1, hat_m_ind)
+#             QIC  QICu Quasi Lik  CIC params  QICC
+# hat_m_ar1 18932 18918     -9411 55.1     48 18820
+# hat_m_ind 18770 18757     -9330 54.5     48 18660
+
+# INDEPENDENCE IS BEST
+
+
+
+#### 7. TESTING IMPORTANCE OF COLLINEAR VARIABLES ####
+
+
+# NASC VERSUS CENTER OF MASS 
+hat_m_nasc <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline + chl_resid_spline + fpers_spline + fpers_resid_spline +
+                       mld_spline + mld_resid_spline + eke_spline + nasc_spline + Lunar +  Year, 
+                     id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_m_center <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline + chl_resid_spline + fpers_spline + fpers_resid_spline +
+                         mld_spline + mld_resid_spline + eke_spline + center_spline + Lunar +  Year, 
+                       id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+geepack::QIC(hat_m_nasc, hat_m_center)
+#               QIC  QICu Quasi Lik  CIC params  QICC
+# hat_m_nasc   18977 18960     -9436 52.3     44 18875
+# hat_m_center 18837 18822     -9367 51.6     44 18735
+
+# CENTER IS BETTER
+
+# SST VERSUS MLD
+
+hat_m_sst <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline + chl_resid_spline + fpers_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + nasc_spline + Lunar + Year, 
+                    id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_m_mld <- geeglm(DPH ~ sst_resid_spline + chl_spline + chl_resid_spline + fpers_spline + fpers_resid_spline +
+                      mld_spline + mld_resid_spline + eke_spline + center_spline + nasc_spline + Lunar + Year, 
+                    id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+geepack::QIC(hat_m_sst, hat_m_mld)
+#             QIC  QICu Quasi Lik   CIC params  QICC
+# hat_m_sst 19108 19084     -9498 56.08     44 19007
+# hat_m_mld 19369 19341     -9626 58.38     44 19268
+
+# SST IS BETTER
+
+# SST VERSUS FPERS (WO MLD)
+
+hat_m_sst <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline + chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + nasc_spline + Lunar + Year, 
+                    id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_m_fpers <- geeglm(DPH ~ sst_resid_spline + chl_spline + chl_resid_spline + fpers_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + nasc_spline + Lunar + Year, 
+                    id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+geepack::QIC(hat_m_sst, hat_m_fpers)
+#               QIC  QICu Quasi Lik  CIC params  QICC
+# hat_m_sst   19508 19475     -9698 56.4     40 19415
+# hat_m_fpers 19635 19599     -9759 58.1     40 19541
+
+# SST IS BETTER
+
+
+#### 8. TESTING NUMBER OF SPLINES IN FULL MODELS - MAX. OF FOUR DF ####
+
+
+# SST #
+hat_df$sst_spline_4 <- bs(hat_df$SST_pred, df = 4)
+hat_df$sst_spline_3 <- bs(hat_df$SST_pred, df = 3)
+hat_df$sst_spline_2 <- I(hat_df$SST_pred^2)
+
+hat_sst_4 <- geeglm(DPH ~ sst_spline_4 + sst_resid_spline + chl_spline +
+                      chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + Lunar + 
+                      Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_sst_3 <- geeglm(DPH ~ sst_spline_3 + sst_resid_spline + chl_spline +
+                      chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + Lunar + 
+                      Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_sst_2 <- geeglm(DPH ~ SST_pred + sst_spline_2 + sst_resid_spline + chl_spline +
+                    chl_resid_spline + fpers_resid_spline +
+                    mld_resid_spline + eke_spline + center_spline + Lunar + 
+                    Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_sst <- geeglm(DPH ~ SST_pred + sst_resid_spline + chl_spline +
+                    chl_resid_spline + fpers_resid_spline +
+                    mld_resid_spline + eke_spline + center_spline + Lunar + 
+                    Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+sst_df <- as.data.frame(geepack::QIC(hat_sst_4, hat_sst_3, hat_sst_2, hat_sst))
+#sst_df$QIC_c <- sst_df$QIC + 2 * (sst_df$params-1)
+#sst_df <- sst_df[order(sst_df$QIC_c),]
+#sst_df$dQIC_c <- sst_df$QIC_c-sst_df$QIC_c[1]
+sst_df <- sst_df[order(sst_df$QICu),]
+sst_df$dQICu <- sst_df$QICu-sst_df$QICu[1]
+sst_df
+#             QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_sst_4 19584 19549     -9739 53.25     36 19498 19654    0.0
+# hat_sst_2 19747 19714     -9823 50.46     34 19665 19813  159.5
+# hat_sst_3 19747 19709     -9820 53.75     35 19663 19815  161.0
+# hat_sst   20203 20166    -10050 51.49     33 20123 20267  613.8
+
+#               QIC     QICu  Quasi Lik      CIC params     QICC    dQICu
+# hat_sst_4 19583.60 19549.11  -9738.554 53.24703     36 19497.67   0.0000
+# hat_sst_3 19746.60 19709.09  -9819.547 53.75468     35 19662.60 159.9847
+# hat_sst_2 19747.14 19714.21  -9823.106 50.46390     34 19665.07 165.1029
+# hat_sst   20203.44 20166.46 -10050.228 51.49037     33 20123.29 617.3481
+
+# 4 is best
+
+# SST RESID - only up to 4 #
+hat_df$sst_resid_spline_4 <- bs(hat_df$SST_resid, df = 4)
+hat_df$sst_resid_spline_3 <- bs(hat_df$SST_resid, df = 3)
+hat_df$sst_resid_spline_2 <- I(hat_df$SST_resid^2)
+
+hat_sst_resid_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline_4 + chl_spline +
+                            chl_resid_spline + fpers_resid_spline +
+                            mld_resid_spline + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_sst_resid_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline_3 + chl_spline +
+                            chl_resid_spline + fpers_resid_spline +
+                            mld_resid_spline + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_sst_resid_2 <- geeglm(DPH ~ sst_spline +  SST_resid + sst_resid_spline_2 + chl_spline +
+                          chl_resid_spline + fpers_resid_spline +
+                          mld_resid_spline + eke_spline + center_spline + Lunar + 
+                          Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_sst_resid <- geeglm(DPH ~ sst_spline + SST_resid + chl_spline +
+                          chl_resid_spline + fpers_resid_spline +
+                          mld_resid_spline + eke_spline + center_spline + Lunar + 
+                          Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+sst_resid_df <- as.data.frame(geepack::QIC(hat_sst_resid_4, hat_sst_resid_3, hat_sst_resid_2, hat_sst_resid))
+# sst_resid_df$QIC_c <- sst_resid_df$QIC + 2 * (sst_resid_df$params-1)
+# sst_resid_df <- sst_resid_df[order(sst_resid_df$QIC_c),]
+# sst_resid_df$dQIC_c <- sst_resid_df$QIC_c-sst_resid_df$QIC_c[1]
+sst_resid_df <- sst_resid_df[order(sst_resid_df$QICu),]
+sst_resid_df$dQICu <- sst_resid_df$QICu-sst_resid_df$QICu[1]
+sst_resid_df
+#                  QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_sst_resid_4 19584 19549     -9739 53.25     36 19498 19654  0.000
+# hat_sst_resid_3 19587 19552     -9741 52.20     35 19503 19655  1.258
+# hat_sst_resid_2 19599 19565     -9748 51.19     34 19517 19665 11.669
+# hat_sst_resid   19607 19571     -9753 50.98     33 19527 19671 17.449
+
+# QIC     QICu Quasi Lik      CIC params     QICC     dQICu
+# hat_sst_resid_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67  0.000000
+# hat_sst_resid_3 19586.86 19552.46 -9741.230 52.19968     35 19502.86  3.352274
+# hat_sst_resid_2 19599.27 19564.89 -9748.446 51.18973     34 19517.20 15.783243
+# hat_sst_resid   19607.05 19571.10 -9752.548 50.97779     33 19526.91 21.987261
+
+# 4 is best
+
+# CHL #
+hat_df$chl_spline_4 <- bs(hat_df$CHL_pred, df = 4)
+hat_df$chl_spline_3 <- bs(hat_df$CHL_pred, df = 3)
+hat_df$chl_spline_2 <- I(hat_df$CHL_pred^2)
+
+hat_chl_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline_4 +
+                      chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + Lunar + 
+                      Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_chl_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline_3 +
+                      chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline + center_spline + Lunar + 
+                      Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_chl_2 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline_2 + CHL_pred + 
+                    chl_resid_spline + fpers_resid_spline +
+                    mld_resid_spline + eke_spline + center_spline + Lunar + 
+                    Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_chl <- geeglm(DPH ~ sst_spline + sst_resid_spline + CHL_pred +
+                    chl_resid_spline + fpers_resid_spline +
+                    mld_resid_spline + eke_spline + center_spline + Lunar + 
+                    Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+chl_df <- as.data.frame(geepack::QIC(hat_chl_4, hat_chl_3, hat_chl_2, hat_chl))
+# chl_df$QIC_c <- chl_df$QIC + 2 * (chl_df$params-1)
+# chl_df <- chl_df[order(chl_df$QIC_c),]
+# chl_df$dQIC_c <- chl_df$QIC_c-chl_df$QIC_c[1]
+chl_df <- chl_df[order(chl_df$QICu),]
+chl_df$dQICu <- chl_df$QICu-chl_df$QICu[1]
+chl_df
+#             QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_chl_4 19584 19549     -9739 53.25     36 19498 19654    0.0
+# hat_chl_3 19765 19723     -9827 55.94     35 19681 19833  179.7
+# hat_chl_2 19844 19801     -9867 55.37     34 19762 19910  256.6
+# hat_chl   19882 19838     -9886 55.02     33 19802 19946  292.5
+
+# QIC     QICu Quasi Lik      CIC params     QICC    dQICu
+# hat_chl_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67   0.0000
+# hat_chl_3 19765.28 19723.39 -9826.696 55.94338     35 19681.28 174.2829
+# hat_chl_2 19844.19 19801.45 -9866.725 55.36836     34 19762.12 252.3414
+# hat_chl   19882.10 19838.07 -9886.033 55.01560     33 19801.96 288.9584
+
+# 4 is best
+
+
+# CHL RESID - only up to 4 #
+hat_df$chl_resid_spline_4 <- bs(hat_df$CHL_resid, df = 4)
+hat_df$chl_resid_spline_3 <- bs(hat_df$CHL_resid, df = 3)
+hat_df$chl_resid_spline_2 <- I(hat_df$CHL_resid^2)
+
+hat_chl_resid_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                            chl_resid_spline_4 + fpers_resid_spline +
+                            mld_resid_spline + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_chl_resid_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                            chl_resid_spline_3 + fpers_resid_spline +
+                            mld_resid_spline + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_chl_resid_2 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                          CHL_resid + chl_resid_spline_2 + fpers_resid_spline +
+                          mld_resid_spline + eke_spline + center_spline + Lunar + 
+                          Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_chl_resid <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                          CHL_resid + fpers_resid_spline +
+                          mld_resid_spline + eke_spline + center_spline + Lunar + 
+                          Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+chl_resid_df <- as.data.frame(geepack::QIC(hat_chl_resid_4, hat_chl_resid_3, hat_chl_resid_2, hat_chl_resid))
+# chl_resid_df$QIC_c <- chl_resid_df$QIC + 2 * (chl_resid_df$params-1)
+# chl_resid_df <- chl_resid_df[order(chl_resid_df$QIC_c),]
+# chl_resid_df$dQIC_c <- chl_resid_df$QIC_c-chl_resid_df$QIC_c[1]
+chl_resid_df <- chl_resid_df[order(chl_resid_df$QICu),]
+chl_resid_df$dQICu <- chl_resid_df$QICu-chl_resid_df$QICu[1]
+chl_resid_df
+#                   QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_chl_resid_4 19584 19549     -9739 53.25     36 19498 19654   0.00
+# hat_chl_resid_2 19666 19628     -9780 52.70     34 19584 19732  77.97
+# hat_chl_resid_3 19667 19630     -9780 53.52     35 19583 19735  81.41
+# hat_chl_resid   19731 19693     -9813 52.16     33 19651 19795 141.36
+
+# QIC     QICu Quasi Lik      CIC params     QICC     dQICu
+# hat_chl_resid_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67   0.00000
+# hat_chl_resid_2 19665.58 19628.18 -9780.089 52.69883     34 19583.51  79.07024
+# hat_chl_resid_3 19667.01 19629.97 -9779.983 53.52384     35 19583.01  80.85791
+# hat_chl_resid   19730.96 19692.65 -9813.324 52.15631     33 19650.82 143.53906
+
+# CHL resid 4 is best
+
+# FPERS RESID - only up to 4 #
+hat_df$fpers_resid_spline_4 <- bs(hat_df$Fpers_resid, df = 4)
+hat_df$fpers_resid_spline_3 <- bs(hat_df$Fpers_resid, df = 3)
+hat_df$fpers_resid_spline_2 <- I(hat_df$Fpers_resid^2)
+
+hat_fpers_resid_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                              chl_resid_spline + fpers_resid_spline_4 +
+                              mld_resid_spline + eke_spline + center_spline + Lunar + 
+                              Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_fpers_resid_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                              chl_resid_spline + fpers_resid_spline_3 +
+                              mld_resid_spline + eke_spline + center_spline + Lunar + 
+                              Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_fpers_resid_2 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                            chl_resid_spline + Fpers_resid + fpers_resid_spline_2 +
+                            mld_resid_spline + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_fpers_resid <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                            chl_resid_spline + Fpers_resid +
+                            mld_resid_spline + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+fpers_resid_df <- as.data.frame(geepack::QIC(hat_fpers_resid_4, hat_fpers_resid_3, hat_fpers_resid_2, hat_fpers_resid))
+# fpers_resid_df$QIC_c <- fpers_resid_df$QIC + 2 * (fpers_resid_df$params-1)
+# fpers_resid_df <- fpers_resid_df[order(fpers_resid_df$QIC_c),]
+# fpers_resid_df$dQIC_c <- fpers_resid_df$QIC_c-fpers_resid_df$QIC_c[1]
+fpers_resid_df <- fpers_resid_df[order(fpers_resid_df$QICu),]
+fpers_resid_df$dQICu <- fpers_resid_df$QICu-fpers_resid_df$QICu[1]
+fpers_resid_df
+#                     QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_fpers_resid_4 19584 19549     -9739 53.25     36 19498 19654   0.00
+# hat_fpers_resid_3 19662 19623     -9776 54.30     35 19578 19730  75.94
+# hat_fpers_resid   19778 19742     -9838 51.01     33 19697 19842 187.96
+# hat_fpers_resid_2 19776 19738     -9835 52.98     34 19694 19842 188.64
+
+# QIC     QICu Quasi Lik      CIC params     QICC     dQICu
+# hat_fpers_resid_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67   0.00000
+# hat_fpers_resid_3 19661.54 19622.94 -9776.471 54.29832     35 19577.54  73.83378
+# hat_fpers_resid_2 19776.25 19738.28 -9835.140 52.98278     34 19694.18 189.17215
+# hat_fpers_resid   19777.56 19741.54 -9837.772 51.00850     33 19697.42 192.43530
+
+# Fpers 4 is best
+
+
+# MLD RESID - only up to 4 #
+hat_df$mld_resid_spline_4 <- bs(hat_df$MLD_resid, df = 4)
+hat_df$mld_resid_spline_3 <- bs(hat_df$MLD_resid, df = 3)
+hat_df$mld_resid_spline_2 <- I(hat_df$MLD_resid^2)
+
+hat_mld_resid_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                            chl_resid_spline + fpers_resid_spline +
+                            mld_resid_spline_4 + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_mld_resid_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                            chl_resid_spline + fpers_resid_spline +
+                            mld_resid_spline_3 + eke_spline + center_spline + Lunar + 
+                            Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_mld_resid_2 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                          chl_resid_spline +  fpers_resid_spline +
+                          MLD_resid + mld_resid_spline_2 + eke_spline + center_spline + Lunar + 
+                          Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_mld_resid <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                          chl_resid_spline + fpers_resid_spline +
+                          MLD_resid + eke_spline + center_spline + Lunar + 
+                          Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+mld_resid_df <- as.data.frame(geepack::QIC(hat_mld_resid_4, hat_mld_resid_3, hat_mld_resid_2, hat_mld_resid))
+# mld_resid_df$QIC_c <- mld_resid_df$QIC + 2 * (mld_resid_df$params-1)
+# mld_resid_df <- mld_resid_df[order(mld_resid_df$QIC_c),]
+# mld_resid_df$dQIC_c <- mld_resid_df$QIC_c-mld_resid_df$QIC_c[1]
+mld_resid_df <- mld_resid_df[order(mld_resid_df$QICu),]
+mld_resid_df$dQICu <- mld_resid_df$QICu-mld_resid_df$QICu[1]
+mld_resid_df
+#                 QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_mld_resid_4 19584 19549     -9739 53.25     36 19498 19654    0.0
+# hat_mld_resid_3 19596 19561     -9745 52.49     35 19512 19664   10.2
+# hat_mld_resid   19879 19838     -9886 53.15     33 19798 19943  289.0
+# hat_mld_resid_2 19887 19839     -9886 57.84     34 19805 19953  299.3
+
+# QIC     QICu Quasi Lik      CIC params     QICC     dQICu
+# hat_mld_resid_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67   0.00000
+# hat_mld_resid_3 19595.81 19560.83 -9745.417 52.48606     35 19511.81  11.72581
+# hat_mld_resid   19878.62 19838.31 -9886.155 53.15452     33 19798.48 289.20207
+# hat_mld_resid_2 19886.90 19839.21 -9885.605 57.84431     34 19804.83 290.10049
+
+# 4 is best
+
+
+# EKE #
+hat_df$eke_spline_4 <- bs(hat_df$sqrt_EKE, df = 4)
+hat_df$eke_spline_3 <- bs(hat_df$sqrt_EKE, df = 3)
+hat_df$eke_spline_2 <- I(hat_df$sqrt_EKE^2)
+
+hat_eke_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                      chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline_4 + center_spline + Lunar + 
+                      Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_eke_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                      chl_resid_spline + fpers_resid_spline +
+                      mld_resid_spline + eke_spline_3 + center_spline + Lunar + 
+                      Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_eke_2 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                    chl_resid_spline + fpers_resid_spline +
+                    mld_resid_spline + sqrt_EKE + eke_spline_2 + center_spline + Lunar + 
+                    Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_eke <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                    chl_resid_spline + fpers_resid_spline +
+                    mld_resid_spline + sqrt_EKE + center_spline + Lunar + 
+                    Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+eke_df <- as.data.frame(geepack::QIC(hat_eke_4, hat_eke_3, hat_eke_2, hat_eke))
+# eke_df$QIC_c <- eke_df$QIC + 2 * (eke_df$params-1)
+# eke_df <- eke_df[order(eke_df$QIC_c),]
+# eke_df$dQIC_c <- eke_df$QIC_c-eke_df$QIC_c[1]
+eke_df <- eke_df[order(eke_df$QICu),]
+eke_df$dQICu <- eke_df$QICu-eke_df$QICu[1]
+eke_df
+#              QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_eke_2 19582 19548     -9740 51.01     34 19500 19648  0.000
+# hat_eke_3 19582 19548     -9739 52.01     35 19498 19650  2.026
+# hat_eke_4 19584 19549     -9739 53.25     36 19498 19654  5.843
+# hat_eke   19610 19581     -9757 47.67     33 19530 19674 26.457
+
+# QIC     QICu Quasi Lik      CIC params     QICC       dQICu
+# hat_eke_2 19581.76 19547.74 -9739.868 51.01154     34 19499.69  0.00000000
+# hat_eke_3 19581.79 19547.77 -9738.887 52.00591     35 19497.79  0.03769984
+# hat_eke_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67  1.37188715
+# hat_eke   19610.22 19580.87 -9757.435 47.67302     33 19530.07 33.13426252
+  
+# EKE 2 is best
+
+
+# CENTER OF MASS #
+hat_df$center_spline_4 <- bs(hat_df$Med_centre_mass, df = 4)
+hat_df$center_spline_3 <- bs(hat_df$Med_centre_mass, df = 3)
+hat_df$center_spline_2 <- I(hat_df$Med_centre_mass^2)
+
+hat_center_4 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                         chl_resid_spline + fpers_resid_spline +
+                         mld_resid_spline + eke_spline + center_spline_4 + Lunar + 
+                         Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_center_3 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                         chl_resid_spline + fpers_resid_spline +
+                         mld_resid_spline + eke_spline + center_spline_3 + Lunar + 
+                         Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_center_2 <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                       chl_resid_spline + fpers_resid_spline +
+                       mld_resid_spline + eke_spline + Med_centre_mass + center_spline_2 + Lunar + 
+                       Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+hat_center <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_spline +
+                       chl_resid_spline + fpers_resid_spline +
+                       mld_resid_spline + eke_spline + Med_centre_mass + Lunar + 
+                       Year, id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+center_df <- as.data.frame(geepack::QIC(hat_center_4, hat_center_3, hat_center_2, hat_center))
+# center_df$QIC_c <- center_df$QIC + 2 * (center_df$params-1)
+# center_df <- center_df[order(center_df$QIC_c),]
+# center_df$dQIC_c <- center_df$QIC_c-center_df$QIC_c[1]
+center_df <- center_df[order(center_df$QICu),]
+center_df$dQICu <- center_df$QICu-center_df$QICu[1]
+center_df
+#               QIC  QICu Quasi Lik   CIC params  QICC QIC_c dQIC_c
+# hat_center_4 19584 19549     -9739 53.25     36 19498 19654   0.00
+# hat_center_3 19635 19599     -9765 52.88     35 19551 19703  49.33
+# hat_center_2 19835 19795     -9864 54.14     34 19753 19901 247.80
+# hat_center   19901 19860     -9897 53.53     33 19821 19965 311.68
+
+# QIC     QICu Quasi Lik      CIC params     QICC     dQICu
+# hat_center_4 19583.60 19549.11 -9738.554 53.24703     36 19497.67   0.00000
+# hat_center_3 19634.93 19599.18 -9764.588 52.87905     35 19550.93  50.06715
+# hat_center_2 19835.40 19795.12 -9863.558 54.14216     34 19753.33 246.00808
+# hat_center   19901.28 19860.22 -9897.110 53.53058     33 19821.14 311.11230
+
+# 4 is best
+
+
+
+# RUNNING FULL MODEL AGAIN
+
+# creating splines
+hat_df$sst_spline <- bs(hat_df$SST_pred, df = 4)
+hat_df$sst_resid_spline <- bs(hat_df$SST_resid, df = 4)
+hat_df$chl_spline <- bs(hat_df$CHL_pred, df = 4)
+hat_df$chl_resid_spline <- bs(hat_df$CHL_resid, df = 4)
+hat_df$fpers_resid_spline <- bs(hat_df$Fpers_resid, df = 4)
+hat_df$mld_resid_spline <- bs(hat_df$MLD_resid, df = 4)
+hat_df$eke_spline <- I(hat_df$sqrt_EKE^2)
+hat_df$center_spline <- bs(hat_df$Med_centre_mass, df = 4)
+
+# fitting full model
+hat_m_full <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + fpers_resid_spline +
+                       mld_resid_spline + eke_spline +sqrt_EKE+ center_spline + Lunar + Year, 
+                     id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+
+summary(hat_m_full)
+acf(resid(hat_m_full)) # some slight autocorrelation
+geepack::QIC(hat_m_full) 
+# QIC      QICu Quasi Lik       CIC    params      QICC 
+# 19582     19548     -9740        51        34     19500 
+
+dwtest(hat_m_full, alternative = "two.sided")
+# data:  hat_m_full
+# DW = 1, p-value <0.0000000000000002
+# alternative hypothesis: true autocorrelation is not 0
+
+# calculating pseudo R2
+null_mod <- geeglm(DPH ~ 1, id = dol_block, data = hat_df, family = gaussian(), corstr = "independence")
+r2 <- function(null, mod, var) {
+  dev_null <- sum((var - fitted(null))^2)
+  dev_model <- sum((var - fitted(mod))^2)
+  pseudo_r2 <- (1 - (dev_model / dev_null))*100
+  return(pseudo_r2)
+}
+r2(null = null_mod, mod = hat_m_full, var = hat_df$DPH)
+# Pseudo R-squared for GEE: 29.5 %
+
+
+#### 9. BACKWARDS SELECTION USING WALD'S TEST ####
+
+hat_full <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                     fpers_resid_spline + mld_resid_spline + eke_spline +sqrt_EKE+ center_spline + 
+                     Lunar, id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+car::Anova(hat_full, test.statistic = "Wald")
+# Response: DPH
+#      Df  Chisq Pr(>Chisq)    
+#   sst_spline          4  32.22    1.7e-06 ***
+#   chl_spline          4  83.94    < 2e-16 ***
+#   sst_resid_spline    4  14.21     0.0067 ** 
+#   chl_resid_spline    4 197.23    < 2e-16 ***
+#   fpers_resid_spline  4  41.00    2.7e-08 ***
+#   mld_resid_spline    4 302.86    < 2e-16 ***
+#   eke_spline          1   0.62     0.4319    
+#   sqrt_EKE            1   0.38     0.5378    
+#   center_spline       4 125.70    < 2e-16 ***
+#   Lunar               1   1.05     0.3050   
+
+# remove EKE
+hat_1 <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                  fpers_resid_spline + mld_resid_spline + center_spline + 
+                  Lunar, id = dol_block, corstr = "independence", 
+                family = gaussian, data = hat_df)
+car::Anova(hat_1, test.statistic = "Wald")
+# Response: DPH
+# Df  Chisq Pr(>Chisq)    
+# sst_spline          4  39.53    5.4e-08 ***
+# chl_spline          4  45.82    2.7e-09 ***
+# sst_resid_spline    4  13.29       0.01 ** 
+# chl_resid_spline    4 146.15    < 2e-16 ***
+# fpers_resid_spline  4  32.74    1.4e-06 ***
+# mld_resid_spline    4  78.98    2.9e-16 ***
+# center_spline       4 207.54    < 2e-16 ***
+# Lunar               1   1.36       0.24    
+
+# remove Lunar
+hat_2 <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                  fpers_resid_spline + mld_resid_spline + center_spline, 
+                id = dol_block, corstr = "independence", 
+                family = gaussian, data = hat_df)
+car::Anova(hat_2, test.statistic = "Wald")
+# Response: DPH
+# Df Chisq Pr(>Chisq)    
+# sst_spline          4  43.0    1.0e-08 ***
+#   chl_spline          4  54.3    4.5e-11 ***
+#   sst_resid_spline    4  13.0      0.011 *  
+#   chl_resid_spline    4  90.4    < 2e-16 ***
+#   fpers_resid_spline  4  30.8    3.3e-06 ***
+#   mld_resid_spline    4 110.3    < 2e-16 ***
+#   center_spline       4 319.6    < 2e-16 ***
+  
+  
+#### 10. REMOVING SIGNIFICANT VARIABLES FROM FULL MODEL AND LOOKING AT CHANGE IN QICU AND R2 ####
+
+
+hat_fin <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                  fpers_resid_spline + mld_resid_spline + center_spline, 
+                  id = dol_block, corstr = "independence", 
+                  family = gaussian, data = hat_df)
+hat_wo_sst <- geeglm(DPH ~ chl_spline+ sst_resid_spline + chl_resid_spline + 
+                     fpers_resid_spline + mld_resid_spline + center_spline, 
+                     id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+hat_wo_chl <- geeglm(DPH ~ sst_spline + sst_resid_spline + chl_resid_spline + 
+                     fpers_resid_spline + mld_resid_spline + center_spline,
+                     id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+hat_wo_sst_resid <- geeglm(DPH ~ sst_spline + chl_spline+ chl_resid_spline + 
+                     fpers_resid_spline + mld_resid_spline + center_spline, 
+                     id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+hat_wo_chl_resid <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline +  
+                     fpers_resid_spline + mld_resid_spline + center_spline,
+                     id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+hat_wo_fpers_resid <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                     mld_resid_spline + center_spline, id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+hat_wo_mld_resid <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                     fpers_resid_spline + center_spline, id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+hat_wo_center <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                     fpers_resid_spline + mld_resid_spline, id = dol_block, corstr = "independence", 
+                   family = gaussian, data = hat_df)
+
+# calculating pseudo R2
+null_mod <- geeglm(DPH ~ 1, id = dol_block, data = hat_df, family = gaussian(), corstr = "independence")
+r2 <- function(null, mod, var) {
+  dev_null <- sum((var - fitted(null))^2)
+  dev_model <- sum((var - fitted(mod))^2)
+  pseudo_r2 <- (1 - (dev_model / dev_null))*100
+  return(pseudo_r2)
+}
+
+QIC_df <- as.data.frame(geepack::QIC(hat_fin, hat_wo_sst, hat_wo_chl, hat_wo_sst_resid, hat_wo_chl_resid, hat_wo_fpers_resid, 
+                                     hat_wo_mld_resid, hat_wo_center))
+QIC_df$Model <- row.names(QIC_df)
+#QIC_df$QIC_diff <- QIC_df$QIC-QIC_df$QIC[QIC_df$Model == "hat_fin"]
+QIC_df$QICu_diff <- QIC_df$QICu-QIC_df$QICu[QIC_df$Model == "hat_fin"]
+# getting R squared
+QIC_df$R2 <- NA
+mod_list <- list(hat_fin, hat_wo_sst, hat_wo_chl, hat_wo_sst_resid, hat_wo_chl_resid, hat_wo_fpers_resid, 
+                  hat_wo_mld_resid, hat_wo_center)
+for (i in 1:nrow(QIC_df)){
+  QIC_df$R2[i] <- r2(null = null_mod, mod = mod_list[[i]], var = hat_df$DPH)
+}
+QIC_df$R2_diff <- QIC_df$R2-QIC_df$R2[QIC_df$Model == "hat_fin"]
+#QIC_df <- QIC_df[order(QIC_df$QIC),]
+QIC_df <- QIC_df[order(QIC_df$QICu),]
+QIC_df
+#                       QIC  QICu Quasi Lik   CIC params  QICC              Model QIC_diff    R2 R2_diff
+# hat_fin            21612 21566    -10754 51.79     29 21539            hat_fin      0.0 22.17  0.0000
+# hat_wo_sst_resid   21737 21688    -10819 49.18     25 21672   hat_wo_sst_resid    125.1 21.70 -0.4715
+# hat_wo_mld_resid   21995 21954    -10952 45.46     25 21930   hat_wo_mld_resid    383.4 20.74 -1.4330
+# hat_wo_chl_resid   22146 22095    -11023 50.23     25 22081   hat_wo_chl_resid    534.1 20.23 -1.9441
+# hat_wo_fpers_resid 22288 22242    -11096 47.78     25 22223 hat_wo_fpers_resid    676.0 19.69 -2.4753
+# hat_wo_chl         22292 22237    -11094 52.39     25 22227         hat_wo_chl    680.2 19.71 -2.4571
+# hat_wo_sst         22523 22487    -11219 42.80     25 22458         hat_wo_sst    911.1 18.81 -3.3620
+# hat_wo_center      23034 22948    -11449 67.96     25 22969      hat_wo_center   1422.3 17.14 -5.0299
+
+#                         QIC     QICu Quasi Lik      CIC params     QICC              Model QICu_diff       R2    R2_diff
+# hat_fin            21611.71 21566.14 -10754.07 51.78763     29 21539.21            hat_fin    0.0000 22.16980  0.0000000
+# hat_wo_sst_resid   21736.80 21688.44 -10819.22 49.17739     25 21671.80   hat_wo_sst_resid  122.3069 21.69826 -0.4715337
+# hat_wo_mld_resid   21995.07 21954.15 -10952.08 45.45685     25 21930.07   hat_wo_mld_resid  388.0155 20.73676 -1.4330374
+# hat_wo_chl_resid   22145.84 22095.38 -11022.69 50.22896     25 22080.84   hat_wo_chl_resid  529.2450 20.22570 -1.9440963
+# hat_wo_chl         22291.94 22237.16 -11093.58 52.38980     25 22226.94         hat_wo_chl  671.0198 19.71267 -2.4571282
+# hat_wo_fpers_resid 22287.72 22242.17 -11096.08 47.77626     25 22222.72 hat_wo_fpers_resid  676.0304 19.69454 -2.4752597
+# hat_wo_sst         22522.81 22487.22 -11218.61 42.79969     25 22457.81         hat_wo_sst  921.0781 18.80780 -3.3619992
+# hat_wo_center      23034.05 22948.13 -11449.07 67.95848     25 22969.05      hat_wo_center 1381.9945 17.13991 -5.0298896
+
+r2(null = null_mod, mod = hat_fin, var = hat_df$DPH)
+# 22.2%
+
+summary(hat_fin)
+
+
+
+
+#### 11. COMPARING DIFFERENT CANDIDATE MODEL SETS (WITHOUT YEAR) ####
+
+
+# full model
+hat_m_full <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                       fpers_resid_spline + mld_resid_spline + center_spline, 
+                     id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+# all oceanography model
+hat_m_oceano <- geeglm(DPH ~ sst_spline + chl_spline+ sst_resid_spline + chl_resid_spline + 
+                         fpers_resid_spline + mld_resid_spline , 
+                       id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+# seasonal oceanography model
+hat_m_season <- geeglm(DPH ~ sst_spline + chl_spline, 
+                       id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+# mesoscale oceanography model
+hat_m_meso <- geeglm(DPH ~  sst_resid_spline + chl_resid_spline + 
+                       fpers_resid_spline + mld_resid_spline , 
+                     id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+# prey model
+hat_m_prey <- geeglm(DPH ~  center_spline, 
+                     id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+# year model
+hat_m_year <- geeglm(DPH ~ Year, 
+                     id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+
+# comparing models
+hat_qic_df <- as.data.frame(geepack::QIC(hat_m_full, hat_m_oceano, hat_m_season, 
+                                         hat_m_meso, hat_m_prey, hat_m_year))
+null_mod <- geeglm(DPH ~ 1, id = dol_block, data = hat_df, family = gaussian(), corstr = "independence")
+hat_qic_df$R2 <- NA
+hat_qic_df$R2[1] <- r2(null = null_mod, mod = hat_m_full, var = hat_df$DPH)
+hat_qic_df$R2[2] <- r2(null = null_mod, mod = hat_m_oceano, var = hat_df$DPH)
+hat_qic_df$R2[3] <- r2(null = null_mod, mod = hat_m_season, var = hat_df$DPH)
+hat_qic_df$R2[4] <- r2(null = null_mod, mod = hat_m_meso, var = hat_df$DPH)
+hat_qic_df$R2[5] <- r2(null = null_mod, mod = hat_m_prey, var = hat_df$DPH)
+hat_qic_df$R2[6] <- r2(null = null_mod, mod = hat_m_year, var = hat_df$DPH)
+#hat_qic_df <- hat_qic_df[order(hat_qic_df$QIC),]
+#hat_qic_df$diff_QIC <- hat_qic_df$QIC-hat_qic_df$QIC[1]
+hat_qic_df <- hat_qic_df[order(hat_qic_df$QICu),]
+hat_qic_df$diff_QICu <- hat_qic_df$QICu-hat_qic_df$QICu[1]
+options(digits=6)
+hat_qic_df
+#                   QIC    QICu Quasi Lik     CIC params    QICC       R2 diff_QIC
+# hat_m_full   21611.7 21566.1  -10754.1 51.7876     29 21539.2 22.16980     0.00
+# hat_m_oceano 23034.0 22948.1  -11449.1 67.9585     25 22969.0 17.13991  1422.34
+# hat_m_year   23716.4 23681.5  -11837.8 20.4455      3 23728.4 14.32686  2104.69
+# hat_m_season 24820.1 24733.7  -12357.8 52.2143      9 24775.1 10.56292  3208.38
+# hat_m_prey   24990.3 24958.2  -12474.1 21.0286      5     Inf  9.72141  3378.55
+# hat_m_meso   25393.1 25312.9  -12639.4 57.1198     17 25342.1  8.52484  3781.41
+
+#                  QIC    QICu Quasi Lik     CIC params    QICC       R2 diff_QICu
+# hat_m_full   21611.7 21566.1  -10754.1 51.7876     29 21539.2 22.16980      0.00
+# hat_m_oceano 23034.0 22948.1  -11449.1 67.9585     25 22969.0 17.13991   1381.99
+# hat_m_year   23716.4 23681.5  -11837.8 20.4455      3 23728.4 14.32686   2115.37
+# hat_m_season 24820.1 24733.7  -12357.8 52.2143      9 24775.1 10.56292   3167.52
+# hat_m_prey   24990.3 24958.2  -12474.1 21.0286      5     Inf  9.72141   3392.07
+# hat_m_meso   25393.1 25312.9  -12639.4 57.1198     17 25342.1  8.52484   3746.74
+
+
+
+
+#### 11. USING GAMS TO SEE WHAT VARIABLE RESPONSES SHOULD LOOK LIKE ####
+
+
+hat_gam_full <- gam(DPH ~ s(SST_pred, bs="cs", k = 5) + 
+                      s(SST_resid, bs="cs", k = 5) + 
+                      s(CHL_pred, bs="cs", k = 5) +
+                      s(CHL_resid, bs="cs", k = 5) + s(MLD_resid, bs="cs", k = 5) +
+                     s(Fpers_resid, bs="cs", k = 5) +
+                      s(sqrt_EKE, bs="cs", k = 5) +
+                      s(Med_centre_mass, bs="cs", k = 5) , 
+                    family = gaussian, data = hat_df)
+plot(hat_gam_full)
+
+# hat_gam_final <- gam(DPH ~ s(SST_pred, bs="cs", k = 5) + 
+#                        s(SST_resid, bs="cs", k = 5) + s(CHL_pred, bs="cs", k = 5) +
+#                        s(CHL_resid, bs="cs", k = 5) + s(Fpers_pred, bs="cs", k = 5) +
+#                        s(log_med_tot_nasc, bs="cs", k = 5) +
+#                        s(Med_centre_mass, bs="cs", k = 5), 
+#                      family = gaussian, data = hat_df)
+# plot(hat_gam_final)  
+
+
+# # JAX
+# jax_gam_full <- gam(DPH ~ s(SST_pred, bs="cs", k = 5) + 
+#                       s(SST_resid, bs="cs", k = 5) + s(CHL_pred, bs="cs", k = 5) +
+#                       s(CHL_resid, bs="cs", k = 5) + s(MLD_resid, bs="cs", k = 5) +
+#                       s(Fpers_pred, bs="cs", k = 5) + s(Fpers_resid, bs="cs", k = 5) +
+#                       s(sqrt_EKE, bs="cs", k = 5) + s(log_med_tot_nasc, bs="cs", k = 5) +
+#                       s(Med_centre_mass, bs="cs", k = 5) + Lunar, 
+#                     family = gaussian, data = jax_df2)
+# plot(jax_gam_full)
+
+
+
+#### 12. CREATING PREDICTIONS FROM GAM-GEE #####
+
+# plot direx
+plot_direx <- "./Plots/Paper_dolphins_prey/Paper figures/"
+
+# Function to get SE from geeglm from ChatGTP
+predict_geeglm_se <- function(model, newdata) {
+  # Predict values using the built-in predict function
+  predicted_values <- predict(model, newdata = newdata, type = "response")
+  
+  # Calculate the linear predictors (Xβ)
+  X <- model.matrix(delete.response(terms(model)), newdata)
+  
+  # Get the variance-covariance matrix of the coefficients
+  vcov_matrix <- summary(model)$cov.scaled
+  
+  # Calculate the standard errors of the linear predictors
+  se_linear_predictors <- sqrt(diag(X %*% vcov_matrix %*% t(X)))
+  
+  # Combine predictions and standard errors into a data frame
+  result <- data.frame(fit = as.vector(predicted_values), se = as.vector(se_linear_predictors))
+  return(result)
+}
+
+hat_fin
+
+hat_df$sst_spline1 <- bs(hat_df$SST_pred, df = 4)[,1]
+hat_df$sst_spline2 <- bs(hat_df$SST_pred, df = 4)[,2]
+hat_df$sst_spline3 <- bs(hat_df$SST_pred, df = 4)[,3]
+hat_df$sst_spline4 <- bs(hat_df$SST_pred, df = 4)[,4]
+
+hat_df$chl_spline1 <- bs(hat_df$CHL_pred, df = 4)[,1]
+hat_df$chl_spline2 <- bs(hat_df$CHL_pred, df = 4)[,2]
+hat_df$chl_spline3 <- bs(hat_df$CHL_pred, df = 4)[,3]
+hat_df$chl_spline4 <- bs(hat_df$CHL_pred, df = 4)[,4]
+
+hat_df$sst_resid_spline1 <- bs(hat_df$SST_resid, df = 4)[,1]
+hat_df$sst_resid_spline2 <- bs(hat_df$SST_resid, df = 4)[,2]
+hat_df$sst_resid_spline3 <- bs(hat_df$SST_resid, df = 4)[,3]
+hat_df$sst_resid_spline4 <- bs(hat_df$SST_resid, df = 4)[,4]
+
+hat_df$chl_resid_spline1 <- bs(hat_df$CHL_resid, df = 4)[,1]
+hat_df$chl_resid_spline2 <- bs(hat_df$CHL_resid, df = 4)[,2]
+hat_df$chl_resid_spline3 <- bs(hat_df$CHL_resid, df = 4)[,3]
+hat_df$chl_resid_spline4 <- bs(hat_df$CHL_resid, df = 4)[,4]
+
+hat_df$fpers_resid_spline1 <- bs(hat_df$Fpers_resid, df = 4)[,1]
+hat_df$fpers_resid_spline2 <- bs(hat_df$Fpers_resid, df = 4)[,2]
+hat_df$fpers_resid_spline3 <- bs(hat_df$Fpers_resid, df = 4)[,3]
+hat_df$fpers_resid_spline4 <- bs(hat_df$Fpers_resid, df = 4)[,4]
+
+hat_df$mld_resid_spline1 <- bs(hat_df$MLD_resid, df = 4)[,1]
+hat_df$mld_resid_spline2 <- bs(hat_df$MLD_resid, df = 4)[,2]
+hat_df$mld_resid_spline3 <- bs(hat_df$MLD_resid, df = 4)[,3]
+hat_df$mld_resid_spline4 <- bs(hat_df$MLD_resid, df = 4)[,4]
+
+hat_df$eke_spline <- I(hat_df$sqrt_EKE^2)
+
+hat_df$center_spline1 <- bs(hat_df$Med_centre_mass, df = 4)[,1]
+hat_df$center_spline2 <- bs(hat_df$Med_centre_mass, df = 4)[,2]
+hat_df$center_spline3 <- bs(hat_df$Med_centre_mass, df = 4)[,3]
+hat_df$center_spline4 <- bs(hat_df$Med_centre_mass, df = 4)[,4]
+
+hat_fin2 <- geeglm(DPH ~ sst_spline1 + sst_spline2 + sst_spline3 + sst_spline4 + chl_spline1 + chl_spline2 +
+                     chl_spline3 + chl_spline4 + sst_resid_spline1 + sst_resid_spline2 + sst_resid_spline3 + 
+                     chl_resid_spline1 + chl_resid_spline2 + chl_resid_spline3 + chl_resid_spline4 + 
+                     fpers_resid_spline1 + fpers_resid_spline2 + fpers_resid_spline3 + fpers_resid_spline4 + 
+                     mld_resid_spline1 + mld_resid_spline2 +
+                     mld_resid_spline3 + mld_resid_spline4 + eke_spline + sqrt_EKE +
+                     center_spline1 + center_spline2 + center_spline3 + center_spline4 + Lunar, 
+                   id = dol_block, corstr = "independence", family = gaussian, data = hat_df)
+
+# CHL PRED #
+
+pred_df_chl <- data.frame(sst_spline1 = mean(hat_df$sst_spline1),
+                          sst_spline2 = mean(hat_df$sst_spline2),
+                          sst_spline3 = mean(hat_df$sst_spline3),
+                          sst_spline4 = mean(hat_df$sst_spline4),
+                          CHL_pred = seq(min(hat_df$CHL_pred), max(hat_df$CHL_pred), 0.01),
+                          sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                          sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                          sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                          sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                          chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                          chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                          chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                          chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                          fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                          fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                          fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                          fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                          mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                          mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                          mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                          mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                          eke_spline = mean(hat_df$eke_spline),
+                          sqrt_EKE = mean(hat_df$sqrt_EKE),
+                          center_spline1 = mean(hat_df$center_spline1),
+                          center_spline2 = mean(hat_df$center_spline2),
+                          center_spline3 = mean(hat_df$center_spline3),
+                          center_spline4 = mean(hat_df$center_spline4),
+                          Lunar = mean(hat_df$Lunar))
+pred_df_chl$chl_spline1 <- bs(pred_df_chl$CHL_pred, df = 4)[,1]
+pred_df_chl$chl_spline2 <- bs(pred_df_chl$CHL_pred, df = 4)[,2]
+pred_df_chl$chl_spline3 <- bs(pred_df_chl$CHL_pred, df = 4)[,3]
+pred_df_chl$chl_spline4 <- bs(pred_df_chl$CHL_pred, df = 4)[,4]
+
+chl_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_chl)
+pred_df_chl$fit <- chl_pred$fit
+pred_df_chl$se <- chl_pred$se
+pred_df_chl$lwr <- pred_df_chl$fit - 1.96 * pred_df_chl$se
+pred_df_chl$upr <- pred_df_chl$fit + 1.96 * pred_df_chl$se
+
+# on log scale
+ggplot() + 
+  geom_point(data = hat_df, aes(CHL_pred, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_ribbon(data = pred_df_chl, aes(x = CHL_pred, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_chl, aes(x = CHL_pred, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("log(Chl)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+# SST PRED #
+
+pred_df_sst <- data.frame(SST_pred = seq(min(hat_df$SST_pred), max(hat_df$SST_pred), 0.1),
+                          sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                          sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                          sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                          sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                          chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                          chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                          chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                          chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                          chl_spline1 = mean(hat_df$chl_spline1),
+                          chl_spline2 = mean(hat_df$chl_spline2),
+                          chl_spline3 = mean(hat_df$chl_spline3),
+                          chl_spline4 = mean(hat_df$chl_spline4),
+                          fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                          fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                          fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                          fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                          mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                          mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                          mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                          mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                          eke_spline = mean(hat_df$eke_spline),
+                          sqrt_EKE = mean(hat_df$sqrt_EKE),
+                          center_spline1 = mean(hat_df$center_spline1),
+                          center_spline2 = mean(hat_df$center_spline2),
+                          center_spline3 = mean(hat_df$center_spline3),
+                          center_spline4 = mean(hat_df$center_spline4),
+                          Lunar = mean(hat_df$Lunar))
+pred_df_sst$sst_spline1 <- bs(pred_df_sst$SST_pred, df = 4)[,1]
+pred_df_sst$sst_spline2 <- bs(pred_df_sst$SST_pred, df = 4)[,2]
+pred_df_sst$sst_spline3 <- bs(pred_df_sst$SST_pred, df = 4)[,3]
+pred_df_sst$sst_spline4 <- bs(pred_df_sst$SST_pred, df = 4)[,4]
+
+sst_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_sst)
+pred_df_sst$fit <- sst_pred$fit
+pred_df_sst$se <- sst_pred$se
+pred_df_sst$lwr <- pred_df_sst$fit - 1.96 * pred_df_sst$se
+pred_df_sst$upr <- pred_df_sst$fit + 1.96 * pred_df_sst$se
+
+ggplot() + 
+  geom_point(data = hat_df, aes(SST_pred, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_ribbon(data = pred_df_sst, aes(x = SST_pred, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_sst, aes(x = SST_pred, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("SST") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+# CHL resid #
+
+pred_df_chl_resid <- data.frame(CHL_resid = seq(min(hat_df$CHL_resid), max(hat_df$CHL_resid), 0.01),
+                                sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                                sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                                sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                                sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                                sst_spline1 = mean(hat_df$sst_spline1),
+                                sst_spline2 = mean(hat_df$sst_spline2),
+                                sst_spline3 = mean(hat_df$sst_spline3),
+                                sst_spline4 = mean(hat_df$sst_spline4),
+                                chl_spline1 = mean(hat_df$chl_spline1),
+                                chl_spline2 = mean(hat_df$chl_spline2),
+                                chl_spline3 = mean(hat_df$chl_spline3),
+                                chl_spline4 = mean(hat_df$chl_spline4),
+                                fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                                fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                                fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                                fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                                mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                                mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                                mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                                mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                                eke_spline = mean(hat_df$eke_spline),
+                                sqrt_EKE = mean(hat_df$sqrt_EKE),
+                                center_spline1 = mean(hat_df$center_spline1),
+                                center_spline2 = mean(hat_df$center_spline2),
+                                center_spline3 = mean(hat_df$center_spline3),
+                                center_spline4 = mean(hat_df$center_spline4),
+                                Lunar = mean(hat_df$Lunar))
+pred_df_chl_resid$chl_resid_spline1 <- bs(pred_df_chl_resid$CHL_resid, df = 4)[,1]
+pred_df_chl_resid$chl_resid_spline2 <- bs(pred_df_chl_resid$CHL_resid, df = 4)[,2]
+pred_df_chl_resid$chl_resid_spline3 <- bs(pred_df_chl_resid$CHL_resid, df = 4)[,3]
+pred_df_chl_resid$chl_resid_spline4 <- bs(pred_df_chl_resid$CHL_resid, df = 4)[,4]
+
+chl_resid_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_chl_resid)
+pred_df_chl_resid$fit <- chl_resid_pred$fit
+pred_df_chl_resid$se <- chl_resid_pred$se
+pred_df_chl_resid$lwr <- pred_df_chl_resid$fit - 1.96 * pred_df_chl_resid$se
+pred_df_chl_resid$upr <- pred_df_chl_resid$fit + 1.96 * pred_df_chl_resid$se
+
+ggplot() + 
+  geom_point(data = hat_df, aes(CHL_resid, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_vline(xintercept = 0, linetype = "dashed", col = "grey50") +
+  geom_ribbon(data = pred_df_chl_resid, aes(x = CHL_resid, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_chl_resid, aes(x = CHL_resid, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("log(Chl) residuals") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+
+# SST resid #
+
+pred_df_sst_resid <- data.frame(SST_resid = seq(min(hat_df$SST_resid), max(hat_df$SST_resid), 0.01),
+                                chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                                chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                                chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                                chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                                sst_spline1 = mean(hat_df$sst_spline1),
+                                sst_spline2 = mean(hat_df$sst_spline2),
+                                sst_spline3 = mean(hat_df$sst_spline3),
+                                sst_spline4 = mean(hat_df$sst_spline4),
+                                chl_spline1 = mean(hat_df$chl_spline1),
+                                chl_spline2 = mean(hat_df$chl_spline2),
+                                chl_spline3 = mean(hat_df$chl_spline3),
+                                chl_spline4 = mean(hat_df$chl_spline4),
+                                fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                                fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                                fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                                fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                                mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                                mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                                mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                                mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                                eke_spline = mean(hat_df$eke_spline),
+                                sqrt_EKE = mean(hat_df$sqrt_EKE),
+                                center_spline1 = mean(hat_df$center_spline1),
+                                center_spline2 = mean(hat_df$center_spline2),
+                                center_spline3 = mean(hat_df$center_spline3),
+                                center_spline4 = mean(hat_df$center_spline4),
+                                Lunar = mean(hat_df$Lunar))
+pred_df_sst_resid$sst_resid_spline1 <- bs(pred_df_sst_resid$SST_resid, df = 4)[,1]
+pred_df_sst_resid$sst_resid_spline2 <- bs(pred_df_sst_resid$SST_resid, df = 4)[,2]
+pred_df_sst_resid$sst_resid_spline3 <- bs(pred_df_sst_resid$SST_resid, df = 4)[,3]
+pred_df_sst_resid$sst_resid_spline4 <- bs(pred_df_sst_resid$SST_resid, df = 4)[,4]
+
+sst_resid_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_sst_resid)
+pred_df_sst_resid$fit <- sst_resid_pred$fit
+pred_df_sst_resid$se <- sst_resid_pred$se
+pred_df_sst_resid$lwr <- pred_df_sst_resid$fit - 1.96 * pred_df_sst_resid$se
+pred_df_sst_resid$upr <- pred_df_sst_resid$fit + 1.96 * pred_df_sst_resid$se
+
+ggplot() + 
+  geom_point(data = hat_df, aes(SST_resid, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_vline(xintercept = 0, linetype = "dashed", col = "grey50") +
+  geom_ribbon(data = pred_df_sst_resid, aes(x = SST_resid, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_sst_resid, aes(x = SST_resid, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("SST residuals") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+
+
+# CENTER OF MASS #
+
+pred_df_center <- data.frame(sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                             sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                             sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                             sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                             chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                             chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                             chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                             chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                             sst_spline1 = mean(hat_df$sst_spline1),
+                             sst_spline2 = mean(hat_df$sst_spline2),
+                             sst_spline3 = mean(hat_df$sst_spline3),
+                             sst_spline4 = mean(hat_df$sst_spline4),
+                             chl_spline1 = mean(hat_df$chl_spline1),
+                             chl_spline2 = mean(hat_df$chl_spline2),
+                             chl_spline3 = mean(hat_df$chl_spline3),
+                             chl_spline4 = mean(hat_df$chl_spline4),
+                             fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                             fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                             fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                             fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                             mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                             mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                             mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                             mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                             eke_spline = mean(hat_df$eke_spline),
+                             sqrt_EKE = mean(hat_df$sqrt_EKE),
+                             Med_centre_mass = seq(min(hat_df$Med_centre_mass), max(hat_df$Med_centre_mass),0.5),
+                             Lunar = mean(hat_df$Lunar))
+pred_df_center$center_spline1 <- bs(pred_df_center$Med_centre_mass, df = 4)[,1]
+pred_df_center$center_spline2 <- bs(pred_df_center$Med_centre_mass, df = 4)[,2]
+pred_df_center$center_spline3 <- bs(pred_df_center$Med_centre_mass, df = 4)[,3]
+pred_df_center$center_spline4 <- bs(pred_df_center$Med_centre_mass, df = 4)[,4]
+
+center_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_center)
+pred_df_center$fit <- center_pred$fit
+pred_df_center$se <- center_pred$se
+pred_df_center$lwr <- pred_df_center$fit - 1.96 * pred_df_center$se
+pred_df_center$upr <- pred_df_center$fit + 1.96 * pred_df_center$se
+pred_df_center$upr[pred_df_center$upr > 24] <- 24
+
+ggplot() + 
+  geom_point(data = hat_df, aes(Med_centre_mass, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_ribbon(data = pred_df_center, aes(x = Med_centre_mass, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_center, aes(x = Med_centre_mass, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("Center of mass") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+
+# Oct24 - change to reduce really low values
+# removing really high and low values
+center_o <- range(hat_df$Med_centre_mass)
+hist(hat_df$Med_centre_mass)
+center_r <- quantile(hat_df$Med_centre_mass,probs=c(.01,.99))
+hat_df$Med_centre_mass2 <- hat_df$Med_centre_mass
+hat_df$Med_centre_mass2[hat_df$Med_centre_mass2<center_r[1]] <- NA
+hat_df$Med_centre_mass2[hat_df$Med_centre_mass2>center_r[2]] <- NA
+pred_df_center$Med_centre_mass2 <- pred_df_center$Med_centre_mass
+pred_df_center$upr2 <- pred_df_center$upr
+pred_df_center$lwr2 <- pred_df_center$lwr
+pred_df_center$fit2 <- pred_df_center$fit
+pred_df_center$Med_centre_mass2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$Med_centre_mass2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$upr2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$upr2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$lwr2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$lwr2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$fit2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+pred_df_center$fit2[pred_df_center$Med_centre_mass2<center_r[1]] <- NA
+
+ggplot() + 
+  geom_point(data = hat_df, aes(Med_centre_mass2, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_ribbon(data = pred_df_center, aes(x = Med_centre_mass2, ymin = lwr2, ymax = upr2), alpha = 0.5) + 
+  geom_line(data = pred_df_center, aes(x = Med_centre_mass2, y = fit2), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("Center of mass") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4)) +
+  scale_x_continuous(limits = c(center_o[1], center_o[2]))
+
+
+
+# EKE #
+
+pred_df_eke <- data.frame(sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                             sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                             sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                             sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                            chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                             chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                             chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                             chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                             sst_spline1 = mean(hat_df$sst_spline1),
+                             sst_spline2 = mean(hat_df$sst_spline2),
+                             sst_spline3 = mean(hat_df$sst_spline3),
+                             sst_spline4 = mean(hat_df$sst_spline4),
+                             chl_spline1 = mean(hat_df$chl_spline1),
+                             chl_spline2 = mean(hat_df$chl_spline2),
+                             chl_spline3 = mean(hat_df$chl_spline3),
+                             chl_spline4 = mean(hat_df$chl_spline4),
+                             fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                             fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                             fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                             fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                             mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                             mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                             mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                             mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                             sqrt_EKE = seq(min(hat_df$sqrt_EKE), max(hat_df$sqrt_EKE),0.01),
+                             center_spline1 = mean(hat_df$center_spline1),
+                             center_spline2 = mean(hat_df$center_spline2),
+                             center_spline3 = mean(hat_df$center_spline3),
+                             center_spline4 = mean(hat_df$center_spline4),
+                          Lunar = mean(hat_df$Lunar))
+pred_df_eke$eke_spline <- I(pred_df_eke$sqrt_EKE^2)
+eke_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_eke)
+pred_df_eke$fit <- eke_pred$fit
+pred_df_eke$se <- eke_pred$se
+pred_df_eke$lwr <- pred_df_eke$fit - 1.96 * pred_df_eke$se
+pred_df_eke$upr <- pred_df_eke$fit + 1.96 * pred_df_eke$se
+
+ggplot() + 
+  geom_point(data = hat_df, aes(sqrt_EKE, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_ribbon(data = pred_df_eke, aes(x =sqrt_EKE, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_eke, aes(x = sqrt_EKE, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("sqrt(EKE)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+
+
+# FPERS RESID #
+
+pred_df_fpers_resid <- data.frame(sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                          sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                          sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                          sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                          chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                          chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                          chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                          chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                          sst_spline1 = mean(hat_df$sst_spline1),
+                          sst_spline2 = mean(hat_df$sst_spline2),
+                          sst_spline3 = mean(hat_df$sst_spline3),
+                          sst_spline4 = mean(hat_df$sst_spline4),
+                          chl_spline1 = mean(hat_df$chl_spline1),
+                          chl_spline2 = mean(hat_df$chl_spline2),
+                          chl_spline3 = mean(hat_df$chl_spline3),
+                          chl_spline4 = mean(hat_df$chl_spline4),
+                          Fpers_resid = seq(min(hat_df$Fpers_resid), max(hat_df$Fpers_resid), 0.01),
+                          mld_resid_spline1 = mean(hat_df$mld_resid_spline1),
+                          mld_resid_spline2 = mean(hat_df$mld_resid_spline2),
+                          mld_resid_spline3 = mean(hat_df$mld_resid_spline3),
+                          mld_resid_spline4 = mean(hat_df$mld_resid_spline4),
+                          eke_spline = mean(hat_df$eke_spline),
+                          sqrt_EKE = mean(hat_df$sqrt_EKE),
+                          center_spline1 = mean(hat_df$center_spline1),
+                          center_spline2 = mean(hat_df$center_spline2),
+                          center_spline3 = mean(hat_df$center_spline3),
+                          center_spline4 = mean(hat_df$center_spline4),
+                          Lunar = mean(hat_df$Lunar))
+pred_df_fpers_resid$fpers_resid_spline1 <- bs(pred_df_fpers_resid$Fpers_resid, df = 4)[,1]
+pred_df_fpers_resid$fpers_resid_spline2 <- bs(pred_df_fpers_resid$Fpers_resid, df = 4)[,2]
+pred_df_fpers_resid$fpers_resid_spline3 <- bs(pred_df_fpers_resid$Fpers_resid, df = 4)[,3]
+pred_df_fpers_resid$fpers_resid_spline4 <- bs(pred_df_fpers_resid$Fpers_resid, df = 4)[,4]
+
+fpers_resid_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_fpers_resid)
+pred_df_fpers_resid$fit <- fpers_resid_pred$fit
+pred_df_fpers_resid$se <- fpers_resid_pred$se
+pred_df_fpers_resid$lwr <- pred_df_fpers_resid$fit - 1.96 * pred_df_fpers_resid$se
+pred_df_fpers_resid$upr <- pred_df_fpers_resid$fit + 1.96 * pred_df_fpers_resid$se
+pred_df_fpers_resid$upr[pred_df_fpers_resid$upr > 24] <- 24
+
+# on log scale
+ggplot() + 
+  geom_point(data = hat_df, aes(Fpers_resid, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_vline(xintercept = 0, linetype = "dashed", col = "grey50") +
+  geom_ribbon(data = pred_df_fpers_resid, aes(x =Fpers_resid, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_fpers_resid, aes(x = Fpers_resid, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("sqrt(Fpers) residuals") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))
+
+# Oct24 - change to reduce really low residual values
+# removing really high and low values
+hist(hat_df$Fpers_resid)
+fpers_r <- quantile(hat_df$Fpers_resid,probs=c(.01,.99))
+ggplot() +
+  geom_point(data = hat_df, aes(Fpers_resid, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_vline(xintercept = 0, linetype = "dashed", col = "grey50") +
+  geom_ribbon(data = pred_df_fpers_resid, aes(x =Fpers_resid, ymin = lwr, ymax = upr), alpha = 0.5) +
+  geom_line(data = pred_df_fpers_resid, aes(x = Fpers_resid, y = fit), linewidth = 0.7) +
+  theme_bw() + ylab("DPH") + xlab("sqrt(Fpers) residuals") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))+
+  scale_x_continuous(limits = c(fpers_r[1], fpers_r[2]))
+
+
+
+# MLD RESID #
+
+pred_df_mld_resid <- data.frame(sst_resid_spline1 = mean(hat_df$sst_resid_spline1),
+                                  sst_resid_spline2 = mean(hat_df$sst_resid_spline2),
+                                  sst_resid_spline3 = mean(hat_df$sst_resid_spline3),
+                                sst_resid_spline4 = mean(hat_df$sst_resid_spline4),
+                                chl_resid_spline1 = mean(hat_df$chl_resid_spline1),
+                                  chl_resid_spline2 = mean(hat_df$chl_resid_spline2),
+                                  chl_resid_spline3 = mean(hat_df$chl_resid_spline3),
+                                  chl_resid_spline4 = mean(hat_df$chl_resid_spline4),
+                                  sst_spline1 = mean(hat_df$sst_spline1),
+                                  sst_spline2 = mean(hat_df$sst_spline2),
+                                  sst_spline3 = mean(hat_df$sst_spline3),
+                                  sst_spline4 = mean(hat_df$sst_spline4),
+                                  chl_spline1 = mean(hat_df$chl_spline1),
+                                  chl_spline2 = mean(hat_df$chl_spline2),
+                                  chl_spline3 = mean(hat_df$chl_spline3),
+                                  chl_spline4 = mean(hat_df$chl_spline4),
+                                  MLD_resid = seq(min(hat_df$MLD_resid), max(hat_df$MLD_resid), 0.01),
+                                  fpers_resid_spline1 = mean(hat_df$fpers_resid_spline1),
+                                  fpers_resid_spline2 = mean(hat_df$fpers_resid_spline2),
+                                  fpers_resid_spline3 = mean(hat_df$fpers_resid_spline3),
+                                  fpers_resid_spline4 = mean(hat_df$fpers_resid_spline4),
+                                  eke_spline = mean(hat_df$eke_spline),
+                                  sqrt_EKE = mean(hat_df$sqrt_EKE),
+                                  center_spline1 = mean(hat_df$center_spline1),
+                                  center_spline2 = mean(hat_df$center_spline2),
+                                  center_spline3 = mean(hat_df$center_spline3),
+                                  center_spline4 = mean(hat_df$center_spline4),
+                                  Lunar = mean(hat_df$Lunar))
+pred_df_mld_resid$mld_resid_spline1 <- bs(pred_df_mld_resid$MLD_resid, df = 4)[,1]
+pred_df_mld_resid$mld_resid_spline2 <- bs(pred_df_mld_resid$MLD_resid, df = 4)[,2]
+pred_df_mld_resid$mld_resid_spline3 <- bs(pred_df_mld_resid$MLD_resid, df = 4)[,3]
+pred_df_mld_resid$mld_resid_spline4 <- bs(pred_df_mld_resid$MLD_resid, df = 4)[,4]
+
+mld_resid_pred <- predict_geeglm_se(model = hat_fin2, newdata = pred_df_mld_resid)
+pred_df_mld_resid$fit <- mld_resid_pred$fit
+pred_df_mld_resid$se <- mld_resid_pred$se
+pred_df_mld_resid$lwr <- pred_df_mld_resid$fit - 1.96 * pred_df_mld_resid$se
+pred_df_mld_resid$upr <- pred_df_mld_resid$fit + 1.96 * pred_df_mld_resid$se
+pred_df_mld_resid$upr[pred_df_mld_resid$upr > 24] <- 24
+
+ggplot() + 
+  geom_point(data = hat_df, aes(MLD_resid, DPH), alpha = 0.5, col = "grey80", size = 0.5)+
+  geom_vline(xintercept = 0, linetype = "dashed", col = "grey50") +
+  geom_ribbon(data = pred_df_mld_resid, aes(x =MLD_resid, ymin = lwr, ymax = upr), alpha = 0.5) + 
+  geom_line(data = pred_df_mld_resid, aes(x = MLD_resid, y = fit), linewidth = 0.7) + 
+  theme_bw() + ylab("DPH") + xlab("MLD residuals") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 15), axis.text = element_text(size = 13))+
+  scale_y_continuous(limits = c(0, 24), breaks = seq(0, 24, 4))+
+  scale_x_continuous(breaks = seq(-10, 15, 5))
+
