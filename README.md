@@ -12,7 +12,27 @@ This repository can be cited through its Zenodo link (X).
  
 ## Codes
 
-The codes are laid out in three sections... TBC
+The codes are laid out in three sections: 
+
+### 1) Reproducing analyses
+
+**1_morphological_comparisons.r**: loads in morphological traits of adults and juveniles and compares between age classes and among species. 
+
+**2_departure_timing_markov_models.r**: loads in time series.... 
+
+**3_departure_bearing_circular_analyses.r**: loads ....
+
+**4_GLMMs_during_1st_month.r**: loads in ... 
+
+### 2) Reproducing figures
+
+**fig1_departure_timing.r**: plots predicted probability of departure from colony based on Markov models in relation to chick mass and age and wind conditions.
+
+**fig2_departure_bearings.r**: loads in departure wind directions and bearings and plots rose diagrams for each species. 
+
+**fig4_behaviour_1st_month.r**: plots predicted latitudes used, orientation, wind use and travel speeds over time during the first month at sea for each species.
+
+**fig5_overall_displacement.r**: plots predicted relationships between departure mass and average wind conditions and displacement of albatrosses after one week and one month post departure. 
 
 ## Data use statement (please read before using)
 
